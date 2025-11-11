@@ -7,6 +7,7 @@ import ai.z.openapi.service.model.ChatMessage;
 import ai.z.openapi.service.model.ChatMessageRole;
 import com.baiye.yudada.common.ErrorCode;
 import com.baiye.yudada.exception.BusinessException;
+import org.springframework.stereotype.Component;
 
 
 import javax.annotation.Resource;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
  * @Create 2025/11/9 22:48
  * @Version 1.0
  */
+@Component
 public class AiManager {
 
     @Resource
