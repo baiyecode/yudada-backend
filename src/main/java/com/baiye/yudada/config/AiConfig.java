@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import javax.annotation.PostConstruct;
+
 
 /**
  * AI 配置类
@@ -25,4 +27,6 @@ public class AiConfig {
                 .apiKey(apiKey)
                 .build();
     }
+
+
 }

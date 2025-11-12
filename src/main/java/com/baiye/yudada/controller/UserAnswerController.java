@@ -89,7 +89,7 @@ public class UserAnswerController {
         try {
             UserAnswer userAnswerWithResult = scoringStrategyExecutor.doScore(choices, app);
             userAnswerWithResult.setId(newUserAnswerId);
-            userAnswerWithResult.setAppId(null);
+            userAnswerWithResult.setAppId(null);//防止更新 appId,分库分表
             userAnswerService.updateById(userAnswerWithResult);
         } catch (Exception e) {
             e.printStackTrace();

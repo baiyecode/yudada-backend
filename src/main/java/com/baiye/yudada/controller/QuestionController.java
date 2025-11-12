@@ -1,5 +1,8 @@
 package com.baiye.yudada.controller;
 
+import ai.z.openapi.service.model.Delta;
+import ai.z.openapi.service.model.ModelData;
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baiye.yudada.manager.AiManager;
 import com.baiye.yudada.model.dto.question.*;
@@ -20,13 +23,18 @@ import com.baiye.yudada.model.entity.User;
 import com.baiye.yudada.model.vo.QuestionVO;
 import com.baiye.yudada.service.QuestionService;
 import com.baiye.yudada.service.UserService;
+import io.reactivex.rxjava3.core.Flowable;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 题目接口
@@ -273,6 +281,7 @@ public class QuestionController {
 
     /**
      * 生成题目的用户信息
+     *
      * @param app
      * @param questionNumber
      * @param optionNumber
@@ -291,6 +300,7 @@ public class QuestionController {
 
     /**
      * AI 生成题目
+     *
      * @param aiGenerateQuestionRequest
      * @return
      */
@@ -306,18 +316,99 @@ public class QuestionController {
         // 封装 Prompt
         String userMessage = getGenerateQuestionUserMessage(app, questionNumber, optionNumber);
         // AI 生成
-        String result = aiManager.doSyncRequest(GENERATE_QUESTION_SYSTEM_MESSAGE, userMessage,null);
+        String result = aiManager.doSyncRequest(GENERATE_QUESTION_SYSTEM_MESSAGE, userMessage, null);
+        //log.info("AI返回结果: {}", result); // 添加日志记录AI返回的原始内容
         // 结果处理
         int start = result.indexOf("[");
         int end = result.lastIndexOf("]");
+        if (start == -1 || end == -1) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "AI返回结果格式错误");
+        }
         String json = result.substring(start, end + 1);
+        if (json.isEmpty()) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "AI返回结果为空");
+        }
         List<QuestionContentDTO> questionContentDTOList = JSONUtil.toList(json, QuestionContentDTO.class);
         return ResultUtils.success(questionContentDTOList);
     }
 
 
+    /**
+     * AI 生成题目 SSE
+     * <p>
+     * SseEmitter 是 Spring 框架提供的一个类，专门用于建立和管理 SSE 连接，允许服务器向客户端推送数据。
+     *
+     * @param aiGenerateQuestionRequest
+     * @return
+     */
+    @GetMapping("/ai_generate/sse")
+    public SseEmitter aiGenerateQuestionSSE(AiGenerateQuestionRequest aiGenerateQuestionRequest) {
+        ThrowUtils.throwIf(aiGenerateQuestionRequest == null, ErrorCode.PARAMS_ERROR);
+        // 获取参数
+        Long appId = aiGenerateQuestionRequest.getAppId();
+        int questionNumber = aiGenerateQuestionRequest.getQuestionNumber();
+        int optionNumber = aiGenerateQuestionRequest.getOptionNumber();
+        // 获取应用信息
+        App app = appService.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR);
+        // 封装 Prompt
+        String userMessage = getGenerateQuestionUserMessage(app, questionNumber, optionNumber);
 
-
+        // 建立 SSE 连接对象，0 表示不超时
+        SseEmitter emitter = new SseEmitter(0L);
+        // AI 生成，sse 流式返回
+        Flowable<ModelData> modelDataFlowable = aiManager.doStreamRequest(GENERATE_QUESTION_SYSTEM_MESSAGE, userMessage, null);
+        StringBuilder contentBuilder = new StringBuilder();// 用于拼接 AI 返回的 json 数据
+        //使用一个原子整数作为计数器，用来追踪当前是否处于 JSON 对象的内部（即 { 和 } 的匹配）。
+        AtomicInteger flag = new AtomicInteger(0);// 用于标记是否开始拼接 json 数据
+        modelDataFlowable
+                // 异步线程池执行
+                .observeOn(Schedulers.io())
+                //提取实际的文本内容 content。
+                .map(modelData -> modelData.getChoices().get(0).getDelta().getContent())
+                //移除提取出的文本内容中的所有空白字符（空格、制表符、换行符等）。
+                .map(message -> message.replaceAll("\\s", ""))
+                //过滤掉空字符串或仅包含空白字符的字符串。
+                .filter(StrUtil::isNotBlank)
+                //分流，将每个字符串转换为 List<Character>，以便逐个字符处理。
+                .flatMap(message -> {
+                    // 将字符串转换为 List<Character>
+                    List<Character> charList = new ArrayList<>();
+                    for (char c : message.toCharArray()) {
+                        charList.add(c);
+                    }
+                    //Iterable 代表了一个可以被遍历的元素集合。Flowable.fromIterable(iterable) 就是告诉 RxJava：
+                    //请创建一个数据流，这个数据流的内容就是 iterable 里包含的每一个元素，按顺序一个一个地发出来。”
+                    //Flowable.fromIterable(charList) 会创建一个 Flowable<Character>，它会依次发射 charList 中的字符。
+                    return Flowable.fromIterable(charList);
+                })
+                //括号匹配算法：https://leetcode.cn/problems/valid-parentheses/description/
+                .doOnNext(c -> {
+                    {
+                        // 识别第一个 [ 表示开始 AI 传输 json 数据，打开 flag 开始拼接 json 数组
+                        if (c == '{') {
+                            flag.addAndGet(1);
+                        }
+                        if (flag.get() > 0) {
+                            contentBuilder.append(c);
+                        }
+                        if (c == '}') {
+                            flag.addAndGet(-1);
+                            if (flag.get() == 0) {
+                                // 累积单套题目满足 json 格式后，sse 推送至前端
+                                // sse 需要压缩成当行 json，sse 无法识别换行
+                                emitter.send(JSONUtil.toJsonStr(contentBuilder.toString()));
+                                // 清空 StringBuilder
+                                contentBuilder.setLength(0);
+                            }
+                        }
+                    }
+                })
+                .doOnError((e) -> log.error("sse error", e))
+                .doOnComplete(emitter::complete)//通知 SSE 连接，数据推送已经结束，客户端会收到结束信号。
+                .subscribe();//订阅流式响应
+        return emitter;
+    }
 
 
     // endregion
