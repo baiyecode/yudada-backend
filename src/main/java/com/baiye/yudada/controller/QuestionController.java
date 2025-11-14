@@ -1,6 +1,5 @@
 package com.baiye.yudada.controller;
 
-import ai.z.openapi.service.model.Delta;
 import ai.z.openapi.service.model.ModelData;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
