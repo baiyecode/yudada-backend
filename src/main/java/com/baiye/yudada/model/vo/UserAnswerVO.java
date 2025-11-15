@@ -6,6 +6,7 @@ import lombok.Data;
 import org.springframework.beans.BeanUtils;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -97,9 +98,14 @@ public class UserAnswerVO implements Serializable {
         }
         UserAnswer userAnswer = new UserAnswer();
         BeanUtils.copyProperties(userAnswerVO, userAnswer);
-        userAnswer.setChoices(JSONUtil.toJsonStr(userAnswerVO.getChoices()));
+        if (userAnswerVO.getChoices() != null) {
+            userAnswer.setChoices(JSONUtil.toJsonStr(userAnswerVO.getChoices()));
+        } else {
+            userAnswer.setChoices("[]");
+        }
         return userAnswer;
     }
+
 
     /**
      * 对象转封装类
@@ -113,7 +119,24 @@ public class UserAnswerVO implements Serializable {
         }
         UserAnswerVO userAnswerVO = new UserAnswerVO();
         BeanUtils.copyProperties(userAnswer, userAnswerVO);
-        userAnswerVO.setChoices(JSONUtil.toList(userAnswer.getChoices(), String.class));
+
+        // 处理choices字段
+        try {
+            if (userAnswer.getChoices() != null && !userAnswer.getChoices().trim().isEmpty()) {
+                // 确保字符串是有效的JSON数组格式
+                String choicesStr = userAnswer.getChoices();
+                if (!choicesStr.startsWith("[")) {
+                    choicesStr = "[" + choicesStr + "]";
+                }
+                userAnswerVO.setChoices(JSONUtil.toList(choicesStr, String.class));
+            } else {
+                userAnswerVO.setChoices(new ArrayList<>());
+            }
+        } catch (Exception e) {
+            // 如果解析失败，设置空列表
+            userAnswerVO.setChoices(new ArrayList<>());
+        }
+
         return userAnswerVO;
     }
 }

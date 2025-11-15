@@ -53,12 +53,12 @@ public class AppController {
         // 在此处将实体类和 DTO 进行转换
         App app = new App();
         BeanUtils.copyProperties(appAddRequest, app);
-        // 数据校验
-        appService.validApp(app, true);
         // 填充默认值
         User loginUser = userService.getLoginUser(request);
         app.setUserId(loginUser.getId());
         app.setReviewStatus(ReviewStatusEnum.REVIEWING.getValue());
+        // 数据校验
+        appService.validApp(app, true);
         // 写入数据库
         boolean result = appService.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
